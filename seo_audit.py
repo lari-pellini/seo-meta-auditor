@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import urllib.request
 from dataclasses import asdict, dataclass
@@ -36,9 +37,13 @@ class PageParser(HTMLParser):
         self.lang: Optional[str] = None
         self.title: Optional[str] = None
         self.meta: Dict[str, str] = {}
+        self.hreflang: List[str] = []
         self.canonical: Optional[str] = None
         self.headings: List[Tuple[int, str]] = []
         self.images: List[Optional[str]] = []
+        self.structured_data: List[str] = []
+        self._in_json_ld = False
+        self._json_ld_parts: List[str] = []
         self._in_title = False
         self._title_parts: List[str] = []
         self._heading_level: Optional[int] = None
@@ -56,16 +61,25 @@ class PageParser(HTMLParser):
             if key and key not in self.meta:
                 self.meta[key] = a.get("content", "").strip()
         elif tag == "link":
-            if "canonical" in a.get("rel", "").lower().split():
+            rel = a.get("rel", "").lower().split()
+            if "canonical" in rel:
                 self.canonical = a.get("href") or None
+            if "alternate" in rel and "hreflang" in a:
+                self.hreflang.append(a["hreflang"].strip())
         elif len(tag) == 2 and tag[0] == "h" and tag[1] in "123456":
             self._heading_level = int(tag[1])
             self._heading_parts = []
         elif tag == "img":
             self.images.append(a["alt"] if "alt" in a else None)
+        elif tag == "script" and a.get("type", "").split(";", 1)[0].strip().lower() == "application/ld+json":
+            self._in_json_ld = True
+            self._json_ld_parts = []
 
     def handle_endtag(self, tag):
-        if tag == "title" and self._in_title:
+        if tag == "script" and self._in_json_ld:
+            self.structured_data.append("".join(self._json_ld_parts))
+            self._in_json_ld = False
+        elif tag == "title" and self._in_title:
             self._in_title = False
             self.title = " ".join("".join(self._title_parts).split())
         elif self._heading_level is not None and tag == "h%d" % self._heading_level:
@@ -74,6 +88,8 @@ class PageParser(HTMLParser):
             self._heading_level = None
 
     def handle_data(self, data):
+        if self._in_json_ld:
+            self._json_ld_parts.append(data)
         if self._in_title:
             self._title_parts.append(data)
         if self._heading_level is not None:
@@ -152,7 +168,66 @@ def audit(html: str) -> List[Check]:
     else:
         checks.append(Check("robots", "pass", "Page is indexable."))
 
+    checks.append(_structured_data_check(page.structured_data))
+    checks.append(_hreflang_check(page.hreflang))
     return checks
+
+
+def _structured_data_check(blocks: List[str]) -> Check:
+    if not blocks:
+        return Check("structured-data", "warn", "No JSON-LD structured data found.")
+
+    types = set()
+    invalid = 0
+
+    def collect(value):
+        if isinstance(value, dict):
+            declared = value.get("@type", [])
+            if isinstance(declared, str):
+                declared = [declared]
+            if isinstance(declared, list):
+                types.update(item for item in declared if isinstance(item, str) and item)
+            for child in value.values():
+                collect(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+
+    for block in blocks:
+        try:
+            value = json.loads(block)
+        except ValueError:
+            invalid += 1
+            continue
+        if not isinstance(value, (dict, list)):
+            invalid += 1
+            continue
+        collect(value)
+
+    found = ", ".join(sorted(types)) or "none"
+    if invalid:
+        return Check("structured-data", "warn", "%d invalid JSON-LD block(s); types found: %s." % (invalid, found))
+    if not types:
+        return Check("structured-data", "warn", "JSON-LD found, but no @type values declared.")
+    return Check("structured-data", "pass", "JSON-LD types found: %s." % found)
+
+
+def _hreflang_check(values: List[str]) -> Check:
+    if not values:
+        return Check("hreflang", "warn", "No hreflang alternates found; x-default is missing.")
+
+    invalid = [value for value in values if not re.fullmatch(
+        r"(?:[A-Za-z]{2,3}|x-default)(?:-[A-Za-z0-9]{2,8})*", value, re.IGNORECASE
+    )]
+    found = ", ".join(values)
+    problems = []
+    if "x-default" not in {value.lower() for value in values}:
+        problems.append("x-default is missing")
+    if invalid:
+        problems.append("invalid language tag(s): " + ", ".join(invalid))
+    if problems:
+        return Check("hreflang", "warn", "Hreflang values found: %s; %s." % (found, "; ".join(problems)))
+    return Check("hreflang", "pass", "Hreflang values found: %s." % found)
 
 
 def score(checks: List[Check]) -> int:

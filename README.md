@@ -22,6 +22,8 @@ A tiny, **zero-dependency** Python CLI that checks the on-page SEO basics of any
 | `open-graph` | `og:title`, `og:description` or `og:image` missing |
 | `img-alt` | any `<img>` without an `alt` attribute (`alt=""` is fine for decorative images) |
 | `robots` | `<meta name="robots">` contains `noindex` |
+| `structured-data` | JSON-LD is missing, invalid, or declares no `@type`; reports types including nested objects and `@graph` entries |
+| `hreflang` | Lists language alternates and warns when `x-default` is missing or a language tag looks invalid |
 
 The score is simple on purpose: pass = 1 point, warning = ½, fail = 0.
 
@@ -55,8 +57,8 @@ python3 -m unittest discover -s tests -v
 
 ## Ideas / roadmap
 
-- [ ] Check `hreflang` alternates
-- [ ] Detect JSON-LD structured data (`Product`, `Article`, `FAQPage`)
+- [x] Check `hreflang` alternates
+- [x] Detect JSON-LD structured data (`Product`, `Article`, `FAQPage`)
 - [ ] Crawl a `sitemap.xml` and audit every URL
 - [ ] HTML report output
 
@@ -66,7 +68,7 @@ Contributions are very welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and th
 
 ## 🇧🇷 Português
 
-CLI em Python, **sem dependências**, que confere o básico de SEO on-page de um arquivo HTML ou URL: tamanho do título e da meta description, `h1`, ordem dos headings, `lang`, viewport, canonical, Open Graph, `alt` das imagens e `noindex`.
+CLI em Python, **sem dependências**, que confere o básico de SEO on-page de um arquivo HTML ou URL: tamanho do título e da meta description, `h1`, ordem dos headings, `lang`, viewport, canonical, Open Graph, `alt` das imagens, `noindex`, marcação JSON-LD e links alternativos `hreflang`.
 
 ```bash
 python3 seo_audit.py minha-landing.html

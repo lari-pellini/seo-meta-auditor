@@ -48,6 +48,58 @@ class AuditTest(unittest.TestCase):
             self.assertEqual(main([os.path.join(EXAMPLES, "good.html")]), 0)
             self.assertEqual(main([os.path.join(EXAMPLES, "bad.html"), "--json"]), 1)
 
+    def test_missing_structured_data_warns(self):
+        self.assertEqual(by_id(audit(""))["structured-data"].status, "warn")
+
+    def test_json_ld_collects_graph_arrays_and_nested_types(self):
+        html = '''<script type="application/ld+json">
+        {"@context":"https://schema.org", "@graph":[
+          {"@type":["Product", "Thing"], "brand":{"@type":"Brand"}},
+          {"@type":"Article"}, {"@type":"Product"}
+        ]}</script><script type="APPLICATION/LD+JSON; charset=utf-8">
+        [{"@type":"FAQPage"}]</script>'''
+        check = by_id(audit(html))["structured-data"]
+        self.assertEqual(check.status, "pass")
+        self.assertEqual(check.message, "JSON-LD types found: Article, Brand, FAQPage, Product, Thing.")
+
+    def test_invalid_json_ld_warns_even_with_a_valid_block(self):
+        for block in ("{", "", "null", "42"):
+            with self.subTest(block=block):
+                html = '<script type="application/ld+json">%s</script>' % block
+                html += '<script type="application/ld+json">{"@type":"Product"}</script>'
+                check = by_id(audit(html))["structured-data"]
+                self.assertEqual(check.status, "warn")
+                self.assertIn("1 invalid JSON-LD", check.message)
+                self.assertIn("Product", check.message)
+
+    def test_json_ld_without_type_and_unrelated_scripts(self):
+        html = '<script type="application/json">{"@type":"Product"}</script>'
+        self.assertEqual(by_id(audit(html))["structured-data"].status, "warn")
+        html += '<script type="application/ld+json">{"name":"Example"}</script>'
+        self.assertIn("no @type", by_id(audit(html))["structured-data"].message)
+
+    def test_hreflang_alternates_require_default_and_valid_tags(self):
+        html = '''<link rel="alternate" hreflang="pt-BR" href="/pt">
+                  <link rel="alternate" hreflang="x-default" href="/">
+                  <link rel="alternate" hreflang="en-GB" href="/en">'''
+        check = by_id(audit(html))["hreflang"]
+        self.assertEqual(check.status, "pass")
+        self.assertIn("pt-BR, x-default, en-GB", check.message)
+
+    def test_hreflang_warns_on_missing_default_bad_code_and_no_alternates(self):
+        check = by_id(audit('<link rel="alternate" hreflang="pt_BR" href="/pt">'))["hreflang"]
+        self.assertEqual(check.status, "warn")
+        self.assertIn("x-default is missing", check.message)
+        self.assertIn("invalid language tag(s): pt_BR", check.message)
+        self.assertEqual(by_id(audit(""))["hreflang"].status, "warn")
+
+    def test_hreflang_ignores_unrelated_links_and_is_case_insensitive(self):
+        html = '<link rel="stylesheet" hreflang="pt_BR"><link rel="alternate" hreflang="PT-BR">'
+        check = by_id(audit(html))["hreflang"]
+        self.assertEqual(check.status, "warn")
+        self.assertNotIn("pt_BR", check.message)
+        self.assertIn("x-default is missing", check.message)
+
 
 if __name__ == "__main__":
     unittest.main()
