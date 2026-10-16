@@ -43,6 +43,24 @@ class AuditTest(unittest.TestCase):
         html = "<title>\n  Fotografia de produto   para e-commerce: guia prático \n</title>"
         self.assertIn("51 chars", by_id(audit(html))["title"].message)
 
+    def test_robots_restrictions_warn(self):
+        for content in ("none", " NONE ", "follow, none", "noindex, nofollow"):
+            with self.subTest(content=content):
+                check = by_id(audit('<meta name="robots" content="%s">' % content))["robots"]
+                self.assertEqual(check.status, "warn")
+
+    def test_robots_restrictions_in_any_meta_tag_warn(self):
+        for first, second in (("index", "noindex"), ("none", "all"), ("all", "none")):
+            with self.subTest(first=first, second=second):
+                html = '<meta name="robots" content="%s"><meta name="robots" content="%s">' % (first, second)
+                self.assertEqual(by_id(audit(html))["robots"].status, "warn")
+
+    def test_robots_preview_restrictions_do_not_block_indexing(self):
+        for content in ("index, follow", "max-image-preview:none", "max-image-preview: none", "nofollow"):
+            with self.subTest(content=content):
+                check = by_id(audit('<meta name="robots" content="%s">' % content))["robots"]
+                self.assertEqual(check.status, "pass")
+
     def test_cli_exit_code_reflects_failures(self):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(main([os.path.join(EXAMPLES, "good.html")]), 0)

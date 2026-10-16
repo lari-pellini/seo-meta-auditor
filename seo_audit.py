@@ -36,6 +36,7 @@ class PageParser(HTMLParser):
         self.lang: Optional[str] = None
         self.title: Optional[str] = None
         self.meta: Dict[str, str] = {}
+        self.robots: List[str] = []
         self.canonical: Optional[str] = None
         self.headings: List[Tuple[int, str]] = []
         self.images: List[Optional[str]] = []
@@ -53,6 +54,8 @@ class PageParser(HTMLParser):
             self._title_parts = []
         elif tag == "meta":
             key = (a.get("name") or a.get("property") or "").lower()
+            if key == "robots":
+                self.robots.extend(rule.strip().lower() for rule in a.get("content", "").split(","))
             if key and key not in self.meta:
                 self.meta[key] = a.get("content", "").strip()
         elif tag == "link":
@@ -147,8 +150,8 @@ def audit(html: str) -> List[Check]:
     else:
         checks.append(Check("img-alt", "pass", "All %d images have an alt attribute." % len(page.images)))
 
-    if "noindex" in page.meta.get("robots", "").lower():
-        checks.append(Check("robots", "warn", "Meta robots contains noindex; this page will not be indexed."))
+    if "noindex" in page.robots or "none" in page.robots:
+        checks.append(Check("robots", "warn", "Meta robots contains noindex or none; this page will not be indexed."))
     else:
         checks.append(Check("robots", "pass", "Page is indexable."))
 
